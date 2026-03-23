@@ -146,7 +146,7 @@ public:
         
         // UI TEAM - Distance in meters
         distance_pub_ = this->create_publisher<std_msgs::msg::Float32>(
-            "/path_distance", qos_reliable);
+            "/nav/path_distance", qos_reliable);
         
         // UI TEAM - Number of obstacles detected
         obstacles_pub_ = this->create_publisher<std_msgs::msg::Int32>(
@@ -158,7 +158,7 @@ public:
         
         // UI TEAM - Navigation status
         status_pub_ = this->create_publisher<std_msgs::msg::String>(
-            "/nav_status", qos_reliable);
+            "/nav/nav_status", qos_reliable);
         
         // UI TEAM - Request new route from OSRM
         route_request_pub_ = this->create_publisher<std_msgs::msg::String>(
