@@ -114,9 +114,9 @@ public:
         
         // Subscribers from the other nodes
         
-        // UI TEAM - GPS destination
+        // UI TEAM - provides GPS destination
         ui_goal_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
-            "/destination_point", qos_reliable,
+            "/ui/destination_point", qos_reliable,
             std::bind(&PathPlanningModule::uiGoalCallback, this, std::placeholders::_1));
         
         // LIDAR TEAM - RAW point cloud (you handle filtering)
