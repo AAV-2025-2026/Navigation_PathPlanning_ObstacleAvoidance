@@ -1,4 +1,4 @@
-
+//include statements
 
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
@@ -36,10 +36,7 @@
 
 using namespace std::chrono_literals;
 
-// ==============================================================================
-// STRUCTURES
-// ==============================================================================
-
+//Structures
 struct GridCell {
     int x, y;
     bool operator==(const GridCell& o) const { return x == o.x && y == o.y; }
@@ -75,7 +72,7 @@ struct AStarNode {
     bool operator<(const AStarNode& o) const { return f_score > o.f_score; }
 };
 
-//Path PLanning 
+//Path PLanning code
 
 
 class PathPlanningModule : public rclcpp::Node {
@@ -119,7 +116,7 @@ public:
         
         // UI TEAM - GPS destination
         ui_goal_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
-            "/destination_coordinate", qos_reliable,
+            "/destination_point", qos_reliable,
             std::bind(&PathPlanningModule::uiGoalCallback, this, std::placeholders::_1));
         
         // LIDAR TEAM - RAW point cloud (you handle filtering)
@@ -141,9 +138,7 @@ public:
             "/odom", qos_sensor,
             std::bind(&PathPlanningModule::odomCallback, this, std::placeholders::_1));
         
-        // ======================================================================
-        // PUBLISHERS - TO UI TEAM & VISUALIZATION
-        // ======================================================================
+         // Publisher Nodes
         
         // UI TEAM - Optimal path in GPS coordinates
         optimal_path_pub_ = this->create_publisher<nav_msgs::msg::Path>(
@@ -173,7 +168,7 @@ public:
         costmap_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
             "/local_costmap", qos_reliable);
         
-        // Timers (optimized for CPU)
+        // Timers 
         obstacle_timer_ = this->create_wall_timer(
             400ms, std::bind(&PathPlanningModule::obstacleTimerCallback, this));
         
@@ -252,10 +247,8 @@ private:
         {-1, -1}, {-1, 1}, {1, -1}, {1, 1}
     };
     
-    // ==========================================================================
-    // INITIALIZATION
-    // ==========================================================================
     
+    //Initialization of the Map
     void initializeMap() {
         map_.header.frame_id = "map";
         map_.info.resolution = resolution_;
@@ -269,36 +262,13 @@ private:
     }
     
     void printStartup() {
-        RCLCPP_INFO(this->get_logger(), "========================================");
-        RCLCPP_INFO(this->get_logger(), "🧭 PATH PLANNING & OBSTACLE AVOIDANCE");
-        RCLCPP_INFO(this->get_logger(), "   Jetson Orin Nano - CPU Target: 25-32%%");
-        RCLCPP_INFO(this->get_logger(), "========================================");
-        RCLCPP_INFO(this->get_logger(), "📥 SUBSCRIPTIONS:");
-        RCLCPP_INFO(this->get_logger(), "   ← /destination_coordinate (UI Team)");
-        RCLCPP_INFO(this->get_logger(), "   ← /velodyne_points (LiDAR - RAW)");
-        RCLCPP_INFO(this->get_logger(), "   ← /aav/stop_sign_detected (Camera)");
-        RCLCPP_INFO(this->get_logger(), "   ← /aav/stop_sign_confidence (Camera)");
-        RCLCPP_INFO(this->get_logger(), "   ← /odom (Odometry)");
-        RCLCPP_INFO(this->get_logger(), "========================================");
-        RCLCPP_INFO(this->get_logger(), "📤 PUBLICATIONS (To UI Team):"); 
-        RCLCPP_INFO(this->get_logger(), "   → /optimal_path (GPS waypoints)");
-        RCLCPP_INFO(this->get_logger(), "   → /path_distance (meters)");
-        RCLCPP_INFO(this->get_logger(), "   → /obstacles_detected (count)");
-        RCLCPP_INFO(this->get_logger(), "   → /obstacle_locations (GPS JSON)");
-        RCLCPP_INFO(this->get_logger(), "   → /nav_status (status string)");
-        RCLCPP_INFO(this->get_logger(), "   → /request_new_route (reroute trigger)");
-        RCLCPP_INFO(this->get_logger(), "   → /local_costmap (visualization)");
-        RCLCPP_INFO(this->get_logger(), "========================================");
-        RCLCPP_INFO(this->get_logger(), "🌍 Origin: (%.6f°, %.6f°)", origin_lat_, origin_lon_);
-        RCLCPP_INFO(this->get_logger(), "🗺️  Map: %dx%d cells (%.1fm resolution)", 
+        RCLCPP_INFO(this->get_logger(), "PATH PLANNING & OBSTACLE AVOIDANCE");
+        RCLCPP_INFO(this->get_logger(), " Origin: (%.6f°, %.6f°)", origin_lat_, origin_lon_);
+        RCLCPP_INFO(this->get_logger(), " Map: %dx%d cells (%.1fm resolution)", 
                     width_, height_, resolution_);
-        RCLCPP_INFO(this->get_logger(), "========================================");
     }
     
-    // ==========================================================================
     // CALLBACKS - RECEIVE FROM UI & SENSORS
-    // ==========================================================================
-    
     void uiGoalCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
         std::lock_guard<std::mutex> lock(goal_mutex_);
         
@@ -318,7 +288,7 @@ private:
         goal_received_ = true;
         
         RCLCPP_INFO(this->get_logger(), 
-            "🎯 Goal from UI: (%.6f°, %.6f°) → Map: (%.2fm, %.2fm)",
+            "Goal from UI: (%.6f°, %.6f°) → Map: (%.2fm, %.2fm)",
             goal_lat, goal_lon, x, y);
         
         publishStatus("planning");
@@ -379,7 +349,7 @@ private:
     void stopSignCallback(const std_msgs::msg::Bool::SharedPtr msg) {
         if (!msg->data) return;
         
-        RCLCPP_WARN(this->get_logger(), "🛑 STOP SIGN DETECTED!");
+        RCLCPP_WARN(this->get_logger(), "STOP SIGN DETECTED!");
         
         std::lock_guard<std::mutex> lock_odom(odom_mutex_);
         std::lock_guard<std::mutex> lock_obs(obstacles_mutex_);
@@ -410,10 +380,7 @@ private:
         odom_received_ = true;
     }
     
-    // ==========================================================================
     // PATH PLANNING - A* ALGORITHM
-    // ==========================================================================
-    
     std::vector<GridCell> aStar(const GridCell& start, const GridCell& goal) {
         auto t0 = std::chrono::steady_clock::now();
         
@@ -438,7 +405,7 @@ private:
                 auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - t0);
                 
-                RCLCPP_INFO(this->get_logger(), "✅ A*: %zu waypoints, %ld ms",
+                RCLCPP_INFO(this->get_logger(), "A*: %zu waypoints, %ld ms",
                             path.size(), dt.count());
                 return path;
             }
@@ -465,14 +432,11 @@ private:
             }
         }
         
-        RCLCPP_WARN(this->get_logger(), "❌ A* failed");
+        RCLCPP_WARN(this->get_logger(), "A* failed");
         return {};
     }
     
-    // ==========================================================================
-    // D* LITE ALGORITHM (Unchanged - already optimized)
-    // ==========================================================================
-    
+    // D* LITE ALGORITHM(Dynamic Replanning for A*)
     void initializeDStarLite(const GridCell& start, const GridCell& goal) {
         dstar_start_ = start;
         dstar_goal_ = goal;
@@ -505,7 +469,7 @@ private:
         auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t0);
         
-        RCLCPP_INFO(this->get_logger(), "✅ D*Lite: %zu waypoints, %ld ms",
+        RCLCPP_INFO(this->get_logger(), "D*Lite: %zu waypoints, %ld ms",
                     path.size(), dt.count());
         
         return path;
@@ -629,11 +593,8 @@ private:
         }
         return path;
     }
-    
-    // ==========================================================================
+
     // OPTIMAL PATH COMPUTATION & SEND TO UI
-    // ==========================================================================
-    
     void planOptimalPath() {
         std::lock_guard<std::mutex> lock_map(map_mutex_);
         std::lock_guard<std::mutex> lock_goal(goal_mutex_);
@@ -685,7 +646,7 @@ private:
             publishStatus("ready");
             
             RCLCPP_INFO(this->get_logger(), 
-                "📊 Sent to UI: %.1fm distance, %zu obstacles",
+                "Sent to UI: %.1fm distance, %zu obstacles",
                 distance, detected_obstacles_.size());
         } else {
             publishStatus("blocked");
@@ -728,17 +689,14 @@ private:
         return distance;
     }
     
-    // ==========================================================================
-    // REPLANNING
-    // ==========================================================================
-    
+    // REPLANNING//
     void checkForReplanning() {
         std::lock_guard<std::mutex> lock(map_mutex_);
         
         if (!dstar_initialized_ || !use_dstar_lite_) return;
         
         if (changed_cells_count_ >= replan_threshold_) {
-            RCLCPP_INFO(this->get_logger(), "🔄 Replan: %d cells changed", 
+            RCLCPP_INFO(this->get_logger(), "Replan: %d cells changed", 
                         changed_cells_count_);
             planOptimalPath();
         }
@@ -805,11 +763,8 @@ private:
         m.data = s;
         status_pub_->publish(m);
     }
-    
-    // ==========================================================================
-    // UTILITIES
-    // ==========================================================================
-    
+
+    // UTILITIES//
     GridCell worldToGrid(double x, double y) {
         int gx = static_cast<int>((x - map_.info.origin.position.x) / resolution_);
         int gy = static_cast<int>((y - map_.info.origin.position.y) / resolution_);
@@ -895,7 +850,7 @@ private:
         obstacle_locations_pub_->publish(msg);
         
         RCLCPP_INFO(this->get_logger(), 
-            "📍 Sent %zu obstacle locations to UI", detected_obstacles_.size());
+            "Sent %zu obstacle locations to UI", detected_obstacles_.size());
     }
     
     void checkIfNeedNewRoute() {
@@ -924,7 +879,7 @@ private:
         
         if (blocked_ratio > 0.2) {
             RCLCPP_WARN(this->get_logger(), 
-                "⚠️  Path significantly blocked (%.0f%%), requesting new route from OSRM",
+                "Path significantly blocked (%.0f%%), requesting new route from OSRM",
                 blocked_ratio * 100.0);
             
             // Tell UI Team to request new route from OSRM
@@ -936,11 +891,7 @@ private:
         }
     }
 };
-
-// ==============================================================================
-// MAIN
-// ==============================================================================
-
+// Main code//
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<PathPlanningModule>();
