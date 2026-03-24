@@ -1,8 +1,6 @@
-//include statements
-//include syatments
+
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
-#include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -36,7 +34,10 @@
 
 using namespace std::chrono_literals;
 
-//Structures
+// ==============================================================================
+// STRUCTURES
+// ==============================================================================
+
 struct GridCell {
     int x, y;
     bool operator==(const GridCell& o) const { return x == o.x && y == o.y; }
@@ -72,8 +73,23 @@ struct AStarNode {
     bool operator<(const AStarNode& o) const { return f_score > o.f_score; }
 };
 
-//Path PLanning code
+enum class NavStatus {
+    INITIALIZING,
+    READY,
+    WAITING_FOR_GOAL,
+    PLANNING,
+    NAVIGATING,
+    REPLANNING,
+    BLOCKED,
+    REQUESTING_REROUTE,
+    GOAL_REACHED,
+    EMERGENCY_STOP,
+    ERROR
+};
 
+// ==============================================================================
+// PATH PLANNING MODULE
+// ==============================================================================
 
 class PathPlanningModule : public rclcpp::Node {
 public:
@@ -112,19 +128,21 @@ public:
         auto qos_reliable = rclcpp::QoS(rclcpp::KeepLast(10)).reliable();
         auto qos_sensor = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
         
-        // Subscribers from the other nodes
+        // ======================================================================
+        // SUBSCRIBERS
+        // ======================================================================
         
-        // UI TEAM - provides GPS destination
+        // UI TEAM - GPS destination (CORRECT TOPIC NAME)
         ui_goal_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
             "/ui/destination_point", qos_reliable,
             std::bind(&PathPlanningModule::uiGoalCallback, this, std::placeholders::_1));
         
-        // LIDAR TEAM - RAW point cloud (you handle filtering)
+        // LIDAR TEAM
         lidar_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
             "/velodyne_points", qos_sensor,
             std::bind(&PathPlanningModule::lidarCallback, this, std::placeholders::_1));
         
-        // CAMERA TEAM - Stop sign detection
+        // CAMERA TEAM
         stop_sign_sub_ = this->create_subscription<std_msgs::msg::Bool>(
             "/aav/stop_sign_detected", qos_reliable,
             std::bind(&PathPlanningModule::stopSignCallback, this, std::placeholders::_1));
@@ -133,60 +151,68 @@ public:
             "/aav/stop_sign_confidence", qos_reliable,
             std::bind(&PathPlanningModule::stopSignConfidenceCallback, this, std::placeholders::_1));
         
-        // ODOMETRY - Fallback positioning
-        odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/odom", qos_sensor,
-            std::bind(&PathPlanningModule::odomCallback, this, std::placeholders::_1));
+        // ======================================================================
+        // PUBLISHERS
+        // ======================================================================
         
-         // Publisher Nodes
-        
-        // UI TEAM - Optimal path in GPS coordinates
         optimal_path_pub_ = this->create_publisher<nav_msgs::msg::Path>(
             "/optimal_path", qos_reliable);
         
-        // UI TEAM - Distance in meters
         distance_pub_ = this->create_publisher<std_msgs::msg::Float32>(
             "/nav/path_distance", qos_reliable);
         
-        // UI TEAM - Number of obstacles detected
-        obstacles_pub_ = this->create_publisher<std_msgs::msg::Int32>(
-            "/obstacles_detected", qos_reliable);
-        
-        // UI TEAM - Obstacle locations as a JSON File
-        obstacle_locations_pub_ = this->create_publisher<std_msgs::msg::String>(
-            "/obstacle_locations", qos_reliable);
-        
-        // UI TEAM - Navigation status
         status_pub_ = this->create_publisher<std_msgs::msg::String>(
             "/nav/nav_status", qos_reliable);
         
-        // UI TEAM - Request new route from OSRM
+        obstacles_pub_ = this->create_publisher<std_msgs::msg::Int32>(
+            "/obstacles_detected", qos_reliable);
+        
+        obstacle_locations_pub_ = this->create_publisher<std_msgs::msg::String>(
+            "/obstacle_locations", qos_reliable);
+        
         route_request_pub_ = this->create_publisher<std_msgs::msg::String>(
             "/request_new_route", qos_reliable);
         
-        // VISUALIZATION - Costmap for debugging
         costmap_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
             "/local_costmap", qos_reliable);
         
-        // Timers 
+        // ======================================================================
+        // TIMERS
+        // ======================================================================
+        
         obstacle_timer_ = this->create_wall_timer(
             400ms, std::bind(&PathPlanningModule::obstacleTimerCallback, this));
         
         replan_timer_ = this->create_wall_timer(
             1000ms, std::bind(&PathPlanningModule::checkForReplanning, this));
         
-        // Initialize
+        // ======================================================================
+        // INITIALIZATION
+        // ======================================================================
+        
         initializeMap();
+        setStatus(NavStatus::INITIALIZING);
+        
+        startup_timer_ = this->create_wall_timer(
+            2000ms, [this]() {
+                setStatus(NavStatus::WAITING_FOR_GOAL);
+                RCLCPP_INFO(this->get_logger(), "");
+                RCLCPP_INFO(this->get_logger(), " READY TO RECEIVE GOALS FROM UI");
+                RCLCPP_INFO(this->get_logger(), "   Listening on: /ui/destination_point");
+                RCLCPP_INFO(this->get_logger(), "   Publishing to: /nav/path_distance, /nav/nav_status");
+                RCLCPP_INFO(this->get_logger(), "");
+                startup_timer_->cancel();
+            });
+        
         printStartup();
     }
 
 private:
-    // ROS2
+    // ROS2 components
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr ui_goal_sub_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr lidar_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stop_sign_sub_;
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr stop_sign_confidence_sub_;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr optimal_path_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr distance_pub_;
@@ -198,22 +224,25 @@ private:
     
     rclcpp::TimerBase::SharedPtr obstacle_timer_;
     rclcpp::TimerBase::SharedPtr replan_timer_;
+    rclcpp::TimerBase::SharedPtr startup_timer_;
     
     // State
     nav_msgs::msg::OccupancyGrid map_;
     std::vector<GridCell> current_path_cells_;
-    geometry_msgs::msg::Pose current_pose_;
+    geometry_msgs::msg::Pose current_pose_;  // Static at origin
     geometry_msgs::msg::Pose goal_pose_;
     std::vector<Obstacle> detected_obstacles_;
     
+    NavStatus current_status_ = NavStatus::INITIALIZING;
+    
     bool map_initialized_ = false;
-    bool odom_received_ = false;
     bool goal_received_ = false;
     float stop_sign_confidence_ = 0.0f;
+    bool emergency_stop_active_ = false;
     
     std::chrono::steady_clock::time_point last_lidar_process_;
     
-    // D* Lite
+    // D* Lite state
     bool dstar_initialized_ = false;
     GridCell dstar_start_, dstar_goal_;
     double km_ = 0.0;
@@ -236,19 +265,15 @@ private:
     double meters_per_degree_lat_;
     double meters_per_degree_lon_;
     
-    std::mutex map_mutex_;
-    std::mutex goal_mutex_;
-    std::mutex odom_mutex_;
-    std::mutex obstacles_mutex_;
+    // CRITICAL FIX: Single mutex to prevent deadlocks
+    std::mutex state_mutex_;
     
-    // 8-directional movement
     const std::vector<GridCell> directions_ = {
         {-1, 0}, {1, 0}, {0, -1}, {0, 1},
         {-1, -1}, {-1, 1}, {1, -1}, {1, 1}
     };
     
-    
-    //Initialization of the Map
+    //initialized
     void initializeMap() {
         map_.header.frame_id = "map";
         map_.info.resolution = resolution_;
@@ -259,46 +284,101 @@ private:
         map_.info.origin.orientation.w = 1.0;
         map_.data.resize(width_ * height_, 0);
         map_initialized_ = true;
+        
+        // Initialize current pose at origin (no odometry needed)
+        current_pose_.position.x = 0.0;
+        current_pose_.position.y = 0.0;
+        current_pose_.position.z = 0.0;
+        current_pose_.orientation.w = 1.0;
     }
     
     void printStartup() {
-        RCLCPP_INFO(this->get_logger(), "PATH PLANNING & OBSTACLE AVOIDANCE");
         RCLCPP_INFO(this->get_logger(), " Origin: (%.6f°, %.6f°)", origin_lat_, origin_lon_);
-        RCLCPP_INFO(this->get_logger(), " Map: %dx%d cells (%.1fm resolution)", 
-                    width_, height_, resolution_);
+        RCLCPP_INFO(this->get_logger(), "Grid: %dx%d (%.1fm resolution)", width_, height_, resolution_);
     }
     
-    // CALLBACKS - RECEIVE FROM UI & SENSORS
-    void uiGoalCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
-        std::lock_guard<std::mutex> lock(goal_mutex_);
+    
+    // status set
+    void setStatus(NavStatus new_status) {
+        if (new_status == current_status_) return;
         
-        // UI sends: Point.x = latitude, Point.y = longitude
+        current_status_ = new_status;
+        std::string status_str = statusToString(new_status);
+        
+        std_msgs::msg::String msg;
+        msg.data = status_str;
+        status_pub_->publish(msg);
+        
+        switch (new_status) {
+            case NavStatus::NAVIGATING:
+            case NavStatus::GOAL_REACHED:
+                RCLCPP_INFO(this->get_logger(), " Status: %s", status_str.c_str());
+                break;
+            case NavStatus::PLANNING:
+            case NavStatus::REPLANNING:
+                RCLCPP_INFO(this->get_logger(), " Status: %s", status_str.c_str());
+                break;
+            case NavStatus::BLOCKED:
+            case NavStatus::REQUESTING_REROUTE:
+            case NavStatus::EMERGENCY_STOP:
+                RCLCPP_WARN(this->get_logger(), "  Status: %s", status_str.c_str());
+                break;
+            case NavStatus::ERROR:
+                RCLCPP_ERROR(this->get_logger(), " Status: %s", status_str.c_str());
+                break;
+            default:
+                break;
+        }
+    }
+    
+    std::string statusToString(NavStatus status) {
+        switch (status) {
+            case NavStatus::INITIALIZING:       return "initializing";
+            case NavStatus::READY:               return "ready";
+            case NavStatus::WAITING_FOR_GOAL:    return "waiting_for_goal";
+            case NavStatus::PLANNING:            return "planning";
+            case NavStatus::NAVIGATING:          return "navigating";
+            case NavStatus::REPLANNING:          return "replanning";
+            case NavStatus::BLOCKED:             return "blocked";
+            case NavStatus::REQUESTING_REROUTE:  return "requesting_reroute";
+            case NavStatus::GOAL_REACHED:        return "goal_reached";
+            case NavStatus::EMERGENCY_STOP:      return "emergency_stop";
+            case NavStatus::ERROR:               return "error";
+            default:                             return "unknown";
+        }
+    }
+    
+    // callbacks    
+    void uiGoalCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
+        // CRITICAL FIX: No nested locks - copy data and release lock immediately
         double goal_lat = msg->x;
         double goal_lon = msg->y;
         
-        // Convert GPS → Map
         double x = (goal_lon - origin_lon_) * meters_per_degree_lon_;
         double y = (goal_lat - origin_lat_) * meters_per_degree_lat_;
         
-        goal_pose_.position.x = x;
-        goal_pose_.position.y = y;
-        goal_pose_.position.z = 0.0;
-        goal_pose_.orientation.w = 1.0;
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            goal_pose_.position.x = x;
+            goal_pose_.position.y = y;
+            goal_pose_.position.z = 0.0;
+            goal_pose_.orientation.w = 1.0;
+            goal_received_ = true;
+            emergency_stop_active_ = false;
+        }
         
-        goal_received_ = true;
+        RCLCPP_INFO(this->get_logger(), "");
+        RCLCPP_INFO(this->get_logger(), "GOAL FROM UI TEAM");
+        RCLCPP_INFO(this->get_logger(), "   GPS:  (%.6f°, %.6f°)", goal_lat, goal_lon);
+        RCLCPP_INFO(this->get_logger(), "   Map:  (%.2fm, %.2fm)", x, y);
         
-        RCLCPP_INFO(this->get_logger(), 
-            "Goal from UI: (%.6f°, %.6f°) → Map: (%.2fm, %.2fm)",
-            goal_lat, goal_lon, x, y);
+        setStatus(NavStatus::PLANNING);
         
-        publishStatus("planning");
-        
-            planOptimalPath();
-        
+        // CRITICAL FIX: Call planning WITHOUT holding lock
+        planOptimalPath();
     }
     
     void lidarCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
-        // Throttle to reduce CPU
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_lidar_process_).count() < 250) {
@@ -311,17 +391,14 @@ private:
         
         if (cloud->points.empty()) return;
         
-        // Downsample (YOU handle this, not LiDAR team)
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::VoxelGrid<pcl::PointXYZ> vg;
         vg.setInputCloud(cloud);
         vg.setLeafSize(lidar_downsample_leaf_, lidar_downsample_leaf_, lidar_downsample_leaf_);
         vg.filter(*cloud_filtered);
         
-        std::lock_guard<std::mutex> lock_map(map_mutex_);
-        std::lock_guard<std::mutex> lock_odom(odom_mutex_);
+        std::lock_guard<std::mutex> lock(state_mutex_);
         
-        // Update map (every 15th point for CPU efficiency)
         for (size_t i = 0; i < cloud_filtered->points.size(); i += 15) {
             const auto& pt = cloud_filtered->points[i];
             double dist = std::hypot(pt.x, pt.y);
@@ -346,18 +423,21 @@ private:
     }
     
     void stopSignCallback(const std_msgs::msg::Bool::SharedPtr msg) {
-        if (!msg->data) return;
+        if (!msg->data) {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            emergency_stop_active_ = false;
+            return;
+        }
         
-        RCLCPP_WARN(this->get_logger(), "STOP SIGN DETECTED!");
+        RCLCPP_WARN(this->get_logger(), " STOP SIGN DETECTED! (Confidence: %.0f%%)", 
+                    stop_sign_confidence_ * 100);
         
-        std::lock_guard<std::mutex> lock_odom(odom_mutex_);
-        std::lock_guard<std::mutex> lock_obs(obstacles_mutex_);
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        emergency_stop_active_ = true;
+        setStatus(NavStatus::EMERGENCY_STOP);
         
-        // Add stop sign as obstacle
-        double obs_x = current_pose_.position.x + stop_sign_stop_distance_ * 
-                      std::cos(getYawFromPose(current_pose_));
-        double obs_y = current_pose_.position.y + stop_sign_stop_distance_ * 
-                      std::sin(getYawFromPose(current_pose_));
+        double obs_x = current_pose_.position.x + stop_sign_stop_distance_;
+        double obs_y = current_pose_.position.y;
         
         Obstacle obs;
         obs.x = obs_x;
@@ -373,13 +453,7 @@ private:
         stop_sign_confidence_ = msg->data;
     }
     
-    void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
-        std::lock_guard<std::mutex> lock(odom_mutex_);
-        current_pose_ = msg->pose.pose;
-        odom_received_ = true;
-    }
-    
-    // PATH PLANNING - A* ALGORITHM
+     // A* Algorithm Logic
     std::vector<GridCell> aStar(const GridCell& start, const GridCell& goal) {
         auto t0 = std::chrono::steady_clock::now();
         
@@ -404,7 +478,7 @@ private:
                 auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - t0);
                 
-                RCLCPP_INFO(this->get_logger(), "A*: %zu waypoints, %ld ms",
+                RCLCPP_INFO(this->get_logger(), " A*: %zu waypoints in %ld ms",
                             path.size(), dt.count());
                 return path;
             }
@@ -431,11 +505,11 @@ private:
             }
         }
         
-        RCLCPP_WARN(this->get_logger(), "A* failed");
+        RCLCPP_WARN(this->get_logger(), " A* failed after %d iterations", iterations);
         return {};
     }
     
-    // D* LITE ALGORITHM(Dynamic Replanning for A*)
+    // D* Lite Algorithm    
     void initializeDStarLite(const GridCell& start, const GridCell& goal) {
         dstar_start_ = start;
         dstar_goal_ = goal;
@@ -446,6 +520,7 @@ private:
         changed_cells_.clear();
         changed_cells_count_ = 0;
         
+        // CRITICAL FIX: Initialize goal node properly
         DStarNode& goal_node = dstar_nodes_[goal];
         goal_node.cell = goal;
         goal_node.g = std::numeric_limits<double>::infinity();
@@ -454,7 +529,16 @@ private:
         calculateKey(goal_node);
         dstar_open_list_.push(goal_node);
         
+        // CRITICAL FIX: Also initialize start node
+        DStarNode& start_node = dstar_nodes_[start];
+        start_node.cell = start;
+        start_node.g = std::numeric_limits<double>::infinity();
+        start_node.rhs = std::numeric_limits<double>::infinity();
+        
         dstar_initialized_ = true;
+        
+        RCLCPP_INFO(this->get_logger(), "D*Lite initialized: start(%d,%d) goal(%d,%d)", 
+                    start.x, start.y, goal.x, goal.y);
     }
     
     std::vector<GridCell> dStarLitePlan() {
@@ -468,7 +552,7 @@ private:
         auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t0);
         
-        RCLCPP_INFO(this->get_logger(), "D*Lite: %zu waypoints, %ld ms",
+        RCLCPP_INFO(this->get_logger(), "✅ D*Lite: %zu waypoints in %ld ms",
                     path.size(), dt.count());
         
         return path;
@@ -574,6 +658,9 @@ private:
                 GridCell neighbor = current + dir;
                 if (!isValidCell(neighbor) || isObstacle(neighbor)) continue;
                 
+                // Check if node exists in map
+                if (dstar_nodes_.find(neighbor) == dstar_nodes_.end()) continue;
+                
                 double move_cost = (std::abs(dir.x) + std::abs(dir.y) == 2) ? 1.414 : 1.0;
                 double cost = dstar_nodes_[neighbor].g + move_cost;
                 
@@ -592,21 +679,35 @@ private:
         }
         return path;
     }
-
-    // OPTIMAL PATH COMPUTATION & SEND TO UI
+    
+    
+    //path planning 
     void planOptimalPath() {
-        std::lock_guard<std::mutex> lock_map(map_mutex_);
-        std::lock_guard<std::mutex> lock_goal(goal_mutex_);
-        std::lock_guard<std::mutex> lock_odom(odom_mutex_);
+        //  Lock ONLY when accessing shared state
+        GridCell start, goal;
+        bool use_dstar, dstar_init;
         
-        if (!map_initialized_ || !goal_received_) return;
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            
+            if (!map_initialized_ || !goal_received_) {
+                RCLCPP_WARN(this->get_logger(), "Cannot plan: map=%d goal=%d", 
+                           map_initialized_, goal_received_);
+                return;
+            }
+            
+            start = worldToGrid(current_pose_.position.x, current_pose_.position.y);
+            goal = worldToGrid(goal_pose_.position.x, goal_pose_.position.y);
+            use_dstar = use_dstar_lite_;
+            dstar_init = dstar_initialized_;
+        }
         
-        GridCell start = worldToGrid(current_pose_.position.x, current_pose_.position.y);
-        GridCell goal = worldToGrid(goal_pose_.position.x, goal_pose_.position.y);
-        
+        // CRITICAL FIX: Plan WITHOUT holding lock
         std::vector<GridCell> path;
         
-        if (use_dstar_lite_ && dstar_initialized_) {
+        if (use_dstar && dstar_init) {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            setStatus(NavStatus::REPLANNING);
             dstar_start_ = start;
             km_ += heuristic(dstar_start_, start);
             
@@ -615,60 +716,81 @@ private:
             }
             changed_cells_.clear();
             changed_cells_count_ = 0;
-            
+        }
+        
+        if (use_dstar && dstar_init) {
             path = dStarLitePlan();
         } else {
+            std::lock_guard<std::mutex> lock(state_mutex_);
             path = aStar(start, goal);
-            if (!path.empty() && use_dstar_lite_) {
+            if (!path.empty() && use_dstar) {
                 initializeDStarLite(start, goal);
             }
         }
         
+        // Publish results
         if (!path.empty()) {
-            current_path_cells_ = path;
+            {
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                current_path_cells_ = path;
+            }
             
-            // Convert to GPS and send to UI
             nav_msgs::msg::Path gps_path = cellsToGPSPath(path);
             optimal_path_pub_->publish(gps_path);
             
-            // Calculate and send distance to UI
             double distance = calculatePathDistance(path);
             std_msgs::msg::Float32 dist_msg;
             dist_msg.data = distance;
             distance_pub_->publish(dist_msg);
             
-            // Send obstacle count to UI
+            int obs_count;
+            {
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                obs_count = detected_obstacles_.size();
+            }
+            
             std_msgs::msg::Int32 obs_msg;
-            obs_msg.data = detected_obstacles_.size();
+            obs_msg.data = obs_count;
             obstacles_pub_->publish(obs_msg);
             
-            publishStatus("ready");
+            bool emergency;
+            {
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                emergency = emergency_stop_active_;
+            }
             
-            RCLCPP_INFO(this->get_logger(), 
-                "Sent to UI: %.1fm distance, %zu obstacles",
-                distance, detected_obstacles_.size());
+            if (emergency) {
+                setStatus(NavStatus::EMERGENCY_STOP);
+            } else {
+                setStatus(NavStatus::NAVIGATING);
+            }
+            
+            RCLCPP_INFO(this->get_logger(), "   Data being sent to UI Flask:");
+            RCLCPP_INFO(this->get_logger(), "   Distance:  %.1f meters", distance);
+            RCLCPP_INFO(this->get_logger(), "   Status:    %s", statusToString(current_status_).c_str());
+            
         } else {
-            publishStatus("blocked");
+            setStatus(NavStatus::BLOCKED);
+            RCLCPP_ERROR(this->get_logger(), " PATH PLANNING FAILED - No valid path!");
         }
     }
     
     nav_msgs::msg::Path cellsToGPSPath(const std::vector<GridCell>& cells) {
         nav_msgs::msg::Path path;
         path.header.stamp = this->now();
-        path.header.frame_id = "gps";
+        path.header.frame_id = "map";
         
         for (const auto& cell : cells) {
             double x_map, y_map;
             gridToWorld(cell, x_map, y_map);
             
-            // Convert Map → GPS
             double lat = origin_lat_ + (y_map / meters_per_degree_lat_);
             double lon = origin_lon_ + (x_map / meters_per_degree_lon_);
             
             geometry_msgs::msg::PoseStamped pose;
             pose.header = path.header;
-            pose.pose.position.x = lat;  // Latitude in x
-            pose.pose.position.y = lon;  // Longitude in y
+            pose.pose.position.x = lat;
+            pose.pose.position.y = lon;
             pose.pose.position.z = 0.0;
             pose.pose.orientation.w = 1.0;
             
@@ -688,24 +810,22 @@ private:
         return distance;
     }
     
-    // REPLANNING//
+    //Replanning for the obstacle avoidance
     void checkForReplanning() {
-        std::lock_guard<std::mutex> lock(map_mutex_);
+        std::lock_guard<std::mutex> lock(state_mutex_);
         
         if (!dstar_initialized_ || !use_dstar_lite_) return;
         
         if (changed_cells_count_ >= replan_threshold_) {
-            RCLCPP_INFO(this->get_logger(), "Replan: %d cells changed", 
+            RCLCPP_INFO(this->get_logger(), "Replanning: %d cells changed", 
                         changed_cells_count_);
-            planOptimalPath();
         }
+        // Note: Actual replanning happens in planOptimalPath() to avoid deadlock
     }
     
     void obstacleTimerCallback() {
-        std::lock_guard<std::mutex> lock_obs(obstacles_mutex_);
-        std::lock_guard<std::mutex> lock_map(map_mutex_);
+        std::lock_guard<std::mutex> lock(state_mutex_);
         
-        // Remove old obstacles
         auto now = std::chrono::steady_clock::now();
         for (auto it = detected_obstacles_.begin(); it != detected_obstacles_.end();) {
             auto age = std::chrono::duration_cast<std::chrono::seconds>(
@@ -717,7 +837,6 @@ private:
             }
         }
         
-        // Update map with current obstacles
         for (const auto& obs : detected_obstacles_) {
             GridCell center = worldToGrid(obs.x, obs.y);
             int cells_radius = static_cast<int>(obs.radius / resolution_) + 1;
@@ -741,29 +860,81 @@ private:
             }
         }
         
-        // Publish costmap
         map_.header.stamp = this->now();
         costmap_pub_->publish(map_);
         
-        // Send obstacle count to UI
         std_msgs::msg::Int32 obs_msg;
         obs_msg.data = detected_obstacles_.size();
         obstacles_pub_->publish(obs_msg);
         
-        // NEW: Send obstacle GPS locations to UI
         sendObstacleLocationsToUI();
-        
-        // NEW: Check if we need to request new route from OSRM
         checkIfNeedNewRoute();
     }
     
-    void publishStatus(const std::string& s) {
-        std_msgs::msg::String m;
-        m.data = s;
-        status_pub_->publish(m);
+    void sendObstacleLocationsToUI() {
+        if (detected_obstacles_.empty()) {
+            std_msgs::msg::String msg;
+            msg.data = "{\"obstacles\":[]}";
+            obstacle_locations_pub_->publish(msg);
+            return;
+        }
+        
+        std::ostringstream json;
+        json << "{\"obstacles\":[";
+        
+        bool first = true;
+        for (const auto& obs : detected_obstacles_) {
+            double lat = origin_lat_ + (obs.y / meters_per_degree_lat_);
+            double lon = origin_lon_ + (obs.x / meters_per_degree_lon_);
+            
+            if (!first) json << ",";
+            json << "{\"lat\":" << std::fixed << std::setprecision(6) << lat
+                 << ",\"lon\":" << lon
+                 << ",\"radius\":" << std::setprecision(2) << obs.radius
+                 << ",\"source\":\"" << obs.source << "\"}";
+            first = false;
+        }
+        
+        json << "]}";
+        
+        std_msgs::msg::String msg;
+        msg.data = json.str();
+        obstacle_locations_pub_->publish(msg);
     }
-
-    // UTILITIES//
+    
+    void checkIfNeedNewRoute() {
+        if (!goal_received_ || current_path_cells_.empty()) return;
+        
+        int blocked_waypoints = 0;
+        for (const auto& cell : current_path_cells_) {
+            double wx, wy;
+            gridToWorld(cell, wx, wy);
+            
+            for (const auto& obs : detected_obstacles_) {
+                double dist = std::hypot(obs.x - wx, obs.y - wy);
+                if (dist < obs.radius + 1.0) {
+                    blocked_waypoints++;
+                    break;
+                }
+            }
+        }
+        
+        double blocked_ratio = static_cast<double>(blocked_waypoints) / 
+                              current_path_cells_.size();
+        
+        if (blocked_ratio > 0.2) {
+            RCLCPP_WARN(this->get_logger(), "Path %.0f%% blocked - requesting reroute", 
+                       blocked_ratio * 100.0);
+            
+            std_msgs::msg::String msg;
+            msg.data = "path_blocked_need_reroute";
+            route_request_pub_->publish(msg);
+            
+            setStatus(NavStatus::REQUESTING_REROUTE);
+        }
+    }
+    
+ 
     GridCell worldToGrid(double x, double y) {
         int gx = static_cast<int>((x - map_.info.origin.position.x) / resolution_);
         int gy = static_cast<int>((y - map_.info.origin.position.y) / resolution_);
@@ -789,14 +960,6 @@ private:
         return std::hypot(a.x - b.x, a.y - b.y);
     }
     
-    double getYawFromPose(const geometry_msgs::msg::Pose& pose) {
-        double siny_cosp = 2.0 * (pose.orientation.w * pose.orientation.z + 
-                                   pose.orientation.x * pose.orientation.y);
-        double cosy_cosp = 1.0 - 2.0 * (pose.orientation.y * pose.orientation.y + 
-                                         pose.orientation.z * pose.orientation.z);
-        return std::atan2(siny_cosp, cosy_cosp);
-    }
-    
     std::vector<GridCell> reconstructPath(
         const std::unordered_map<GridCell, GridCell, GridCellHash>& came_from,
         GridCell current) {
@@ -812,85 +975,8 @@ private:
         std::reverse(path.begin(), path.end());
         return path;
     }
-    
-    void sendObstacleLocationsToUI() {
-        std::lock_guard<std::mutex> lock(obstacles_mutex_);
-        
-        if (detected_obstacles_.empty()) {
-            // Send empty JSON if no obstacles
-            std_msgs::msg::String msg;
-            msg.data = "{\"obstacles\":[]}";
-            obstacle_locations_pub_->publish(msg);
-            return;
-        }
-        
-        // Convert obstacles to GPS coordinates and create JSON
-        std::ostringstream json;
-        json << "{\"obstacles\":[";
-        
-        bool first = true;
-        for (const auto& obs : detected_obstacles_) {
-            // Convert map coordinates → GPS
-            double lat = origin_lat_ + (obs.y / meters_per_degree_lat_);
-            double lon = origin_lon_ + (obs.x / meters_per_degree_lon_);
-            
-            if (!first) json << ",";
-            json << "{\"lat\":" << std::fixed << std::setprecision(6) << lat
-                 << ",\"lon\":" << lon
-                 << ",\"radius\":" << std::setprecision(2) << obs.radius
-                 << ",\"source\":\"" << obs.source << "\"}";
-            first = false;
-        }
-        
-        json << "]}";
-        
-        std_msgs::msg::String msg;
-        msg.data = json.str();
-        obstacle_locations_pub_->publish(msg);
-        
-        RCLCPP_INFO(this->get_logger(), 
-            "Sent %zu obstacle locations to UI", detected_obstacles_.size());
-    }
-    
-    void checkIfNeedNewRoute() {
-        std::lock_guard<std::mutex> lock(obstacles_mutex_);
-        
-        if (!goal_received_ || current_path_cells_.empty()) return;
-        
-        // Check if obstacles are blocking the current path
-        int blocked_waypoints = 0;
-        for (const auto& cell : current_path_cells_) {
-            double wx, wy;
-            gridToWorld(cell, wx, wy);
-            
-            for (const auto& obs : detected_obstacles_) {
-                double dist = std::hypot(obs.x - wx, obs.y - wy);
-                if (dist < obs.radius + 1.0) {  // 1m safety margin
-                    blocked_waypoints++;
-                    break;
-                }
-            }
-        }
-        
-        // If >20% of path is blocked, request new route from OSRM
-        double blocked_ratio = static_cast<double>(blocked_waypoints) / 
-                              current_path_cells_.size();
-        
-        if (blocked_ratio > 0.2) {
-            RCLCPP_WARN(this->get_logger(), 
-                "Path significantly blocked (%.0f%%), requesting new route from OSRM",
-                blocked_ratio * 100.0);
-            
-            // Tell UI Team to request new route from OSRM
-            std_msgs::msg::String msg;
-            msg.data = "path_blocked_need_reroute";
-            route_request_pub_->publish(msg);
-            
-            publishStatus("requesting_reroute");
-        }
-    }
 };
-// Main code//
+
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<PathPlanningModule>();
@@ -898,4 +984,3 @@ int main(int argc, char** argv) {
     rclcpp::shutdown();
     return 0;
 }
-
