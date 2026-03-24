@@ -293,9 +293,8 @@ private:
         
         publishStatus("planning");
         
-        if (odom_received_) {
             planOptimalPath();
-        }
+        
     }
     
     void lidarCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
@@ -600,7 +599,7 @@ private:
         std::lock_guard<std::mutex> lock_goal(goal_mutex_);
         std::lock_guard<std::mutex> lock_odom(odom_mutex_);
         
-        if (!map_initialized_ || !odom_received_ || !goal_received_) return;
+        if (!map_initialized_ || !goal_received_) return;
         
         GridCell start = worldToGrid(current_pose_.position.x, current_pose_.position.y);
         GridCell goal = worldToGrid(goal_pose_.position.x, goal_pose_.position.y);
