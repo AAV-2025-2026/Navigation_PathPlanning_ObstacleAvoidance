@@ -1,4 +1,4 @@
-
+//include statments//
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -34,10 +34,7 @@
 
 using namespace std::chrono_literals;
 
-// ==============================================================================
-// STRUCTURES
-// ==============================================================================
-
+//represents the cells in a grid map
 struct GridCell {
     int x, y;
     bool operator==(const GridCell& o) const { return x == o.x && y == o.y; }
@@ -45,18 +42,21 @@ struct GridCell {
     GridCell operator+(const GridCell& o) const { return {x + o.x, y + o.y}; }
 };
 
+//used to help navigate through the graph 
 struct GridCellHash {
     std::size_t operator()(const GridCell& c) const {
         return std::hash<int>()(c.x) ^ (std::hash<int>()(c.y) << 1);
     }
 };
 
+//it stores the detected obstacle info
 struct Obstacle {
     double x, y, radius;
     std::chrono::steady_clock::time_point timestamp;
     std::string source;
 };
 
+//stores the values needed when D* is activated(replanning algorithm)
 struct DStarNode {
     GridCell cell;
     double g, rhs;
@@ -67,12 +67,14 @@ struct DStarNode {
     }
 };
 
+//stores values for A* when activated
 struct AStarNode {
     GridCell cell;
     double f_score;
     bool operator<(const AStarNode& o) const { return f_score > o.f_score; }
 };
 
+//state machine for the status when node is activated
 enum class NavStatus {
     INITIALIZING,
     READY,
@@ -87,10 +89,7 @@ enum class NavStatus {
     ERROR
 };
 
-// ==============================================================================
-// PATH PLANNING MODULE
-// ==============================================================================
-
+//Path Planning code
 class PathPlanningModule : public rclcpp::Node {
 public:
     PathPlanningModule() : Node("path_planning_module") {
@@ -128,21 +127,19 @@ public:
         auto qos_reliable = rclcpp::QoS(rclcpp::KeepLast(10)).reliable();
         auto qos_sensor = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
         
-        // ======================================================================
-        // SUBSCRIBERS
-        // ======================================================================
+         //Subscriber Nodes
         
-        // UI TEAM - GPS destination (CORRECT TOPIC NAME)
+        // UI TEAM - OSRM Route 
         ui_goal_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
             "/ui/destination_point", qos_reliable,
             std::bind(&PathPlanningModule::uiGoalCallback, this, std::placeholders::_1));
         
-        // LIDAR TEAM
+        // LIDAR Team's node
         lidar_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
             "/velodyne_points", qos_sensor,
             std::bind(&PathPlanningModule::lidarCallback, this, std::placeholders::_1));
         
-        // CAMERA TEAM
+        // Camera stop sign node
         stop_sign_sub_ = this->create_subscription<std_msgs::msg::Bool>(
             "/aav/stop_sign_detected", qos_reliable,
             std::bind(&PathPlanningModule::stopSignCallback, this, std::placeholders::_1));
@@ -150,57 +147,49 @@ public:
         stop_sign_confidence_sub_ = this->create_subscription<std_msgs::msg::Float32>(
             "/aav/stop_sign_confidence", qos_reliable,
             std::bind(&PathPlanningModule::stopSignConfidenceCallback, this, std::placeholders::_1));
-        
-        // ======================================================================
-        // PUBLISHERS
-        // ======================================================================
-        
+
+        //Publisher Nodes
+
+        //returns the most optimal path
         optimal_path_pub_ = this->create_publisher<nav_msgs::msg::Path>(
             "/optimal_path", qos_reliable);
-        
+
+        //distance from start to end goal and updates it
         distance_pub_ = this->create_publisher<std_msgs::msg::Float32>(
             "/nav/path_distance", qos_reliable);
-        
+
+        //status of what the navigation is in
         status_pub_ = this->create_publisher<std_msgs::msg::String>(
             "/nav/nav_status", qos_reliable);
         
+        //obstacle detected for info collection
         obstacles_pub_ = this->create_publisher<std_msgs::msg::Int32>(
             "/obstacles_detected", qos_reliable);
-        
+
+        //obstacle location nodes
         obstacle_locations_pub_ = this->create_publisher<std_msgs::msg::String>(
             "/obstacle_locations", qos_reliable);
-        
-        route_request_pub_ = this->create_publisher<std_msgs::msg::String>(
-            "/request_new_route", qos_reliable);
-        
+
+         //costmap generated
         costmap_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
             "/local_costmap", qos_reliable);
         
-        // ======================================================================
-        // TIMERS
-        // ======================================================================
-        
+         //timers planned for timing for obstacles and the replanning
         obstacle_timer_ = this->create_wall_timer(
             400ms, std::bind(&PathPlanningModule::obstacleTimerCallback, this));
         
         replan_timer_ = this->create_wall_timer(
             1000ms, std::bind(&PathPlanningModule::checkForReplanning, this));
         
-        // ======================================================================
-        // INITIALIZATION
-        // ======================================================================
-        
+        //initialized the map
+        //status initial state set
         initializeMap();
         setStatus(NavStatus::INITIALIZING);
         
         startup_timer_ = this->create_wall_timer(
             2000ms, [this]() {
                 setStatus(NavStatus::WAITING_FOR_GOAL);
-                RCLCPP_INFO(this->get_logger(), "");
-                RCLCPP_INFO(this->get_logger(), " READY TO RECEIVE GOALS FROM UI");
-                RCLCPP_INFO(this->get_logger(), "   Listening on: /ui/destination_point");
-                RCLCPP_INFO(this->get_logger(), "   Publishing to: /nav/path_distance, /nav/nav_status");
-                RCLCPP_INFO(this->get_logger(), "");
+                RCLCPP_INFO(this->get_logger(), " Ready to receive data");
                 startup_timer_->cancel();
             });
         
