@@ -3,6 +3,7 @@
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -127,12 +128,19 @@ public:
         auto qos_reliable = rclcpp::QoS(rclcpp::KeepLast(10)).reliable();
         auto qos_sensor = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
         
-         //Subscriber Nodes
-        
+        //Subscriber ndoes
+
         // UI TEAM - OSRM Route 
         ui_goal_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
             "/ui/destination_point", qos_reliable,
             std::bind(&PathPlanningModule::uiGoalCallback, this, std::placeholders::_1));
+        
+        // GPS Node
+        // NavSatFix provides lat/lon which is converted to local map (x,y) coordinates.
+        // STATUS_NO_FIX messages are ignored to prevent corrupting current_pose_.
+        gnss_sub_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
+            "/aav/gps/fix", qos_sensor,
+            std::bind(&PathPlanningModule::gnssCallback, this, std::placeholders::_1));
         
         // LIDAR Team's node
         lidar_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -148,7 +156,7 @@ public:
             "/aav/stop_sign_confidence", qos_reliable,
             std::bind(&PathPlanningModule::stopSignConfidenceCallback, this, std::placeholders::_1));
 
-        //Publisher Nodes
+        // Publisher Nodes
 
         //returns the most optimal path
         optimal_path_pub_ = this->create_publisher<nav_msgs::msg::Path>(
@@ -170,11 +178,11 @@ public:
         obstacle_locations_pub_ = this->create_publisher<std_msgs::msg::String>(
             "/obstacle_locations", qos_reliable);
 
-         //costmap generated
+        //costmap generated
         costmap_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
             "/local_costmap", qos_reliable);
         
-         //timers planned for timing for obstacles and the replanning
+        //timers planned for timing for obstacles and the replanning
         obstacle_timer_ = this->create_wall_timer(
             400ms, std::bind(&PathPlanningModule::obstacleTimerCallback, this));
         
@@ -199,6 +207,7 @@ public:
 private:
     // ROS2 components
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr ui_goal_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gnss_sub_;   // ← NEW
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr lidar_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stop_sign_sub_;
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr stop_sign_confidence_sub_;
@@ -218,7 +227,7 @@ private:
     // State
     nav_msgs::msg::OccupancyGrid map_;
     std::vector<GridCell> current_path_cells_;
-    geometry_msgs::msg::Pose current_pose_;  // Static at origin
+    geometry_msgs::msg::Pose current_pose_;
     geometry_msgs::msg::Pose goal_pose_;
     std::vector<Obstacle> detected_obstacles_;
     
@@ -226,6 +235,7 @@ private:
     
     bool map_initialized_ = false;
     bool goal_received_ = false;
+    bool gnss_fix_received_ = false;   // ← NEW: tracks whether we have a valid GPS fix
     float stop_sign_confidence_ = 0.0f;
     bool emergency_stop_active_ = false;
     
@@ -262,7 +272,8 @@ private:
         {-1, -1}, {-1, 1}, {1, -1}, {1, 1}
     };
     
-    //initialized
+    // Initialization of the Map
+
     void initializeMap() {
         map_.header.frame_id = "map";
         map_.info.resolution = resolution_;
@@ -274,7 +285,7 @@ private:
         map_.data.resize(width_ * height_, 0);
         map_initialized_ = true;
         
-        // Initialize current pose at origin (no odometry needed)
+        // Default pose at map origin; overwritten by gnssCallback once a fix arrives
         current_pose_.position.x = 0.0;
         current_pose_.position.y = 0.0;
         current_pose_.position.z = 0.0;
@@ -286,8 +297,8 @@ private:
         RCLCPP_INFO(this->get_logger(), "Grid: %dx%d (%.1fm resolution)", width_, height_, resolution_);
     }
     
-    
-    // status set
+    // Status
+
     void setStatus(NavStatus new_status) {
         if (new_status == current_status_) return;
         
@@ -337,7 +348,42 @@ private:
         }
     }
     
-    // callbacks    
+    // callback functions
+    //for gnss
+    void gnssCallback(const sensor_msgs::msg::NavSatFix::SharedPtr msg) {
+        // Reject any fix that has no valid position
+        if (msg->status.status == sensor_msgs::msg::NavSatStatus::STATUS_NO_FIX) {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                "GNSS: No fix yet, ignoring position update");
+            return;
+        }
+
+        // Converts the lat/lon to m
+        double x = (msg->longitude - origin_lon_) * meters_per_degree_lon_;
+        double y = (msg->latitude  - origin_lat_) * meters_per_degree_lat_;
+
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+
+            bool first_fix = !gnss_fix_received_;
+            gnss_fix_received_ = true;
+
+            current_pose_.position.x = x;
+            current_pose_.position.y = y;
+            current_pose_.position.z = msg->altitude;   // ellipsoidal height from GNSS node
+            current_pose_.orientation.w = 1.0;
+
+            if (first_fix) {
+                RCLCPP_INFO(this->get_logger(),
+                    "GNSS fix acquired: (%.6f°, %.6f°) → map (%.2fm, %.2fm)",
+                    msg->latitude, msg->longitude, x, y);
+            }
+        }
+
+        RCLCPP_DEBUG(this->get_logger(),
+            "GNSS pose updated: map (%.2f, %.2f)", x, y);
+    }
+     //ui callback function
     void uiGoalCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
         // CRITICAL FIX: No nested locks - copy data and release lock immediately
         double goal_lat = msg->x;
@@ -362,11 +408,9 @@ private:
         RCLCPP_INFO(this->get_logger(), "   Map:  (%.2fm, %.2fm)", x, y);
         
         setStatus(NavStatus::PLANNING);
-        
-        // CRITICAL FIX: Call planning WITHOUT holding lock
         planOptimalPath();
     }
-    
+    //LiDAR Callback function
     void lidarCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -442,7 +486,7 @@ private:
         stop_sign_confidence_ = msg->data;
     }
     
-     // A* Algorithm Logic
+    // A* Algorithm function
     std::vector<GridCell> aStar(const GridCell& start, const GridCell& goal) {
         auto t0 = std::chrono::steady_clock::now();
         
@@ -498,7 +542,7 @@ private:
         return {};
     }
     
-    // D* Lite Algorithm    
+    //D* Algorithm
     void initializeDStarLite(const GridCell& start, const GridCell& goal) {
         dstar_start_ = start;
         dstar_goal_ = goal;
@@ -508,8 +552,7 @@ private:
         while (!dstar_open_list_.empty()) dstar_open_list_.pop();
         changed_cells_.clear();
         changed_cells_count_ = 0;
-        
-        // CRITICAL FIX: Initialize goal node properly
+    
         DStarNode& goal_node = dstar_nodes_[goal];
         goal_node.cell = goal;
         goal_node.g = std::numeric_limits<double>::infinity();
@@ -517,8 +560,7 @@ private:
         
         calculateKey(goal_node);
         dstar_open_list_.push(goal_node);
-        
-        // CRITICAL FIX: Also initialize start node
+    
         DStarNode& start_node = dstar_nodes_[start];
         start_node.cell = start;
         start_node.g = std::numeric_limits<double>::infinity();
@@ -541,7 +583,7 @@ private:
         auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t0);
         
-        RCLCPP_INFO(this->get_logger(), "✅ D*Lite: %zu waypoints in %ld ms",
+        RCLCPP_INFO(this->get_logger(), "D*Lite: %zu waypoints in %ld ms",
                     path.size(), dt.count());
         
         return path;
@@ -669,10 +711,9 @@ private:
         return path;
     }
     
-    
-    //path planning 
+  //Path Planning Logic
     void planOptimalPath() {
-        //  Lock ONLY when accessing shared state
+        // Lock ONLY when accessing shared state
         GridCell start, goal;
         bool use_dstar, dstar_init;
         
@@ -684,14 +725,18 @@ private:
                            map_initialized_, goal_received_);
                 return;
             }
-            
+
+            if (!gnss_fix_received_) {
+                RCLCPP_WARN(this->get_logger(),
+                    "Cannot plan: waiting for first GNSS fix on /aav/gps/fix");
+                return;
+            }
             start = worldToGrid(current_pose_.position.x, current_pose_.position.y);
             goal = worldToGrid(goal_pose_.position.x, goal_pose_.position.y);
             use_dstar = use_dstar_lite_;
             dstar_init = dstar_initialized_;
         }
         
-        // CRITICAL FIX: Plan WITHOUT holding lock
         std::vector<GridCell> path;
         
         if (use_dstar && dstar_init) {
@@ -799,7 +844,7 @@ private:
         return distance;
     }
     
-    //Replanning for the obstacle avoidance
+    //Replanning Method
     void checkForReplanning() {
         std::lock_guard<std::mutex> lock(state_mutex_);
         
@@ -809,7 +854,6 @@ private:
             RCLCPP_INFO(this->get_logger(), "Replanning: %d cells changed", 
                         changed_cells_count_);
         }
-        // Note: Actual replanning happens in planOptimalPath() to avoid deadlock
     }
     
     void obstacleTimerCallback() {
@@ -923,7 +967,7 @@ private:
         }
     }
     
- 
+     //Grid System
     GridCell worldToGrid(double x, double y) {
         int gx = static_cast<int>((x - map_.info.origin.position.x) / resolution_);
         int gy = static_cast<int>((y - map_.info.origin.position.y) / resolution_);
