@@ -48,19 +48,21 @@ Description: Current Location
 
 ## How to Build
 
-Prerequisites
+# Prerequisites
 
 ```bash
 sudo apt install \
 ros-humble-desktop \  
 ros-humble-pcl-ros \    
-libpcl-dev ```
+libpcl-dev
+```
 
-Setup
+# Setup
 
 ```bash
 mkdir -p ~/ros2_ws/src
-cd ~/ros2_ws/src```
+cd ~/ros2_ws/src
+```
 
 **Make sure to copy navigation_system.cpp to navigation_cpp/src/
 
@@ -68,7 +70,8 @@ cd ~/ros2_ws/src```
 
 colcon build --packages-select navigation_cpp
 
-source install/setup.bash'''
+source install/setup.bash
+'''
 
 ## How to Run
 Mock data using mock coordinates for the /ui/destination_point using ros 2 terminals
@@ -76,19 +79,21 @@ Mock data using mock coordinates for the /ui/destination_point using ros 2 termi
 Terminal 1:
 
 ```bash
-ros2 run navigation_cpp path_planning_module```
+ros2 run navigation_cpp path_planning_module
+```
 
 Terminal 2:
 
 ```bash
 ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3849, y: -75.6959, z: 0.0}"; sleep 2; 
 ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3850, y: -75.6957, z: 0.0}"; sleep 2; 
-ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3851, y: -75.6955, z: 0.0}" ```
+ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3851, y: -75.6955, z: 0.0}"
+```
 
 ## Expected Output
 
 Terminal 1:
- [INFO] [1775792057.210518948] [path_planning_module]: Goal sent from UI Team
+[INFO] [1775792057.210518948] [path_planning_module]: Goal sent from UI Team
 [INFO] [1775792057.211507597] [path_planning_module]:    GPS Info:  (45.384900°, -75.695900°)
 [INFO] [1775792057.211670463] [path_planning_module]:  Status: planning
 [INFO] [1775792057.213357166] [path_planning_module]:  A*: 47 waypoints in 1 ms
