@@ -264,7 +264,7 @@ private:
     double meters_per_degree_lat_;
     double meters_per_degree_lon_;
     
-    // CRITICAL FIX: Single mutex to prevent deadlocks
+    // Single mutex to prevent deadlocks
     std::mutex state_mutex_;
     
     const std::vector<GridCell> directions_ = {
@@ -588,7 +588,7 @@ private:
         
         return path;
     }
-    
+    //Computes the shortest path function
     void computeShortestPath() {
         int iterations = 0;
         
