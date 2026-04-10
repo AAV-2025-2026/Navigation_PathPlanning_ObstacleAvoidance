@@ -66,12 +66,12 @@ cd ~/ros2_ws/src
 
 **Make sure to copy navigation_system.cpp to navigation_cpp/src/
 
-'''cd ~/ros2_ws
+```cd ~/ros2_ws
 
 colcon build --packages-select navigation_cpp
 
 source install/setup.bash
-'''
+```
 
 ## How to Run
 Mock data using mock coordinates for the /ui/destination_point using ros 2 terminals
