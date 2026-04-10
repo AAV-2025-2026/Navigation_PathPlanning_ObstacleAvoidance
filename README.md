@@ -50,19 +50,19 @@ Description: Current Location
 
 Prerequisites
 
-'''sudo apt install \
+```sudo apt install \
 
 ros-humble-desktop \
     
 ros-humble-pcl-ros \
     
-libpcl-dev'''
+libpcl-dev```
 
 # Setup
 
-'''mkdir -p ~/ros2_ws/src
+```mkdir -p ~/ros2_ws/src
 
-cd ~/ros2_ws/src'''
+cd ~/ros2_ws/src```
 
 **Make sure to copy navigation_system.cpp to navigation_cpp/src/
 
@@ -79,13 +79,13 @@ Mock data using mock coordinates for the /ui/destination_point using ros 2 termi
 
 Terminal 1:
 
-'''ros2 run navigation_cpp path_planning_module'''
+```ros2 run navigation_cpp path_planning_module```
 
 Terminal 2:
 
-'''ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3849, y: -75.6959, z: 0.0}"; sleep 2; 
+```ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3849, y: -75.6959, z: 0.0}"; sleep 2; 
 ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3850, y: -75.6957, z: 0.0}"; sleep 2; 
-ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3851, y: -75.6955, z: 0.0}" '''
+ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3851, y: -75.6955, z: 0.0}" ```
 
 ## Expected Output
 
