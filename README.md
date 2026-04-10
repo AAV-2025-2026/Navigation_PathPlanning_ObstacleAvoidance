@@ -94,35 +94,65 @@ ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3851
 
 Terminal 1:
 [INFO] [1775792057.210518948] [path_planning_module]: Goal sent from UI Team
+
 [INFO] [1775792057.211507597] [path_planning_module]:    GPS Info:  (45.384900°, -75.695900°)
+
 [INFO] [1775792057.211670463] [path_planning_module]:  Status: planning
+
 [INFO] [1775792057.213357166] [path_planning_module]:  A*: 47 waypoints in 1 ms
+
 [INFO] [1775792057.213482989] [path_planning_module]: D*Lite initialized: start(75,75) goal(121,119)
+
 [INFO] [1775792057.213640607] [path_planning_module]:  Status: navigating
+
 [INFO] [1775792057.213716526] [path_planning_module]:    Data being sent to UI Flask:
+
 [INFO] [1775792057.213729267] [path_planning_module]:    Distance:  32.1 meters
+
 [INFO] [1775792057.213741799] [path_planning_module]:    Status:    navigating
+
 [INFO] [1775792059.263741966] [path_planning_module]: 
+
 [INFO] [1775792059.263904844] [path_planning_module]:    Listening on: /ui/destination_point
+
 [INFO] [1775792059.263918597] [path_planning_module]:    Publishing to: /nav/path_distance, /nav/nav_status
+
 [INFO] [1775792059.263927002] [path_planning_module]: 
+
 [INFO] [1775792060.701894085] [path_planning_module]: Goal sent from UI Team
+
 [INFO] [1775792060.702024228] [path_planning_module]:    GPS Info:  (45.385000°, -75.695700°)
+
 [INFO] [1775792060.702079072] [path_planning_module]:  Status: planning
+
 [INFO] [1775792060.702106689] [path_planning_module]:  Status: replanning
+
 [INFO] [1775792060.751358838] [path_planning_module]:  D*Lite: 1 waypoints in 48 ms
+
 [INFO] [1775792060.751793232] [path_planning_module]:  Status: navigating
+
 [INFO] [1775792060.751816953] [path_planning_module]:    Data being sent to UI Flask:
+
 [INFO] [1775792060.751826178] [path_planning_module]:    Distance:  0.0 meters
+
 [INFO] [1775792060.751838109] [path_planning_module]:    Status:    navigating
+
 [INFO] [1775792064.005423063] [path_planning_module]: Goal sent from UI Team
+
 [INFO] [1775792064.005530899] [path_planning_module]:    GPS Info:  (45.385100°, -75.695500°)
+
 [INFO] [1775792064.005559389] [path_planning_module]:  Status: planning
+
 [INFO] [1775792064.005570849] [path_planning_module]:  Status: replanning
+
 [INFO] [1775792064.039019570] [path_planning_module]:  D*Lite: 1 waypoints in 33 ms
+
 [INFO] [1775792064.039447070] [path_planning_module]:  Status: navigating
+
 [INFO] [1775792064.039555037] [path_planning_module]:    Data being sent to UI Flask:
+
 [INFO] [1775792064.039578037] [path_planning_module]:    Distance:  0.0 meters
+
 [INFO] [1775792064.039603791] [path_planning_module]:    Status: navigating
 
 
