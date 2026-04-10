@@ -93,6 +93,7 @@ ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3851
 ## Expected Output
 
 Terminal 1:
+
 [INFO] [1775792057.210518948] [path_planning_module]: Goal sent from UI Team
 
 [INFO] [1775792057.211507597] [path_planning_module]:    GPS Info:  (45.384900°, -75.695900°)
