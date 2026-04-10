@@ -158,7 +158,10 @@ Terminal 1:
 
 
 ## Next Steps
+
 1.) Test with Cameras, GNSS for a vehicle test to ensure real world data can interact with the navigation module
+
 2.) Test with real data with the UI Destination point using the NVIDIA JETSON AGX Orin 
+
 3.) Validate results and ensure for correct functionality when finishing the integration and full system integration process
 
