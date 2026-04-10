@@ -47,26 +47,28 @@ Type: sensor_msgs/msg/NavSatFix
 Description: Current Location 
 
 ## How to Build
+## Setup
 
 Prerequisites
 
-```sudo apt install \
+``` sudo apt install \
 
 ros-humble-desktop \
     
 ros-humble-pcl-ros \
     
-libpcl-dev```
+libpcl-dev ```
 
-# Setup
+## Setup
 
 ```mkdir -p ~/ros2_ws/src
 
 cd ~/ros2_ws/src```
 
+
 **Make sure to copy navigation_system.cpp to navigation_cpp/src/
 
-# Build
+
 
 '''cd ~/ros2_ws
 
