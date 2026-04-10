@@ -47,28 +47,22 @@ Type: sensor_msgs/msg/NavSatFix
 Description: Current Location 
 
 ## How to Build
-## Setup
 
 Prerequisites
 
-``` sudo apt install \
-
-ros-humble-desktop \
-    
-ros-humble-pcl-ros \
-    
+```bash
+sudo apt install \
+ros-humble-desktop \  
+ros-humble-pcl-ros \    
 libpcl-dev ```
 
-## Setup
+Setup
 
-```mkdir -p ~/ros2_ws/src
-
+```bash
+mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src```
 
-
 **Make sure to copy navigation_system.cpp to navigation_cpp/src/
-
-
 
 '''cd ~/ros2_ws
 
@@ -81,11 +75,13 @@ Mock data using mock coordinates for the /ui/destination_point using ros 2 termi
 
 Terminal 1:
 
-```ros2 run navigation_cpp path_planning_module```
+```bash
+ros2 run navigation_cpp path_planning_module```
 
 Terminal 2:
 
-```ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3849, y: -75.6959, z: 0.0}"; sleep 2; 
+```bash
+ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3849, y: -75.6959, z: 0.0}"; sleep 2; 
 ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3850, y: -75.6957, z: 0.0}"; sleep 2; 
 ros2 topic pub --once /ui/destination_point geometry_msgs/msg/Point "{x: 45.3851, y: -75.6955, z: 0.0}" ```
 
